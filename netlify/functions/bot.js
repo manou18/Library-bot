@@ -2,11 +2,16 @@ const TelegramBot = require('node-telegram-bot-api');
 const { canUserDownload, isUserVip, getSystemStats, upgradeUserToVip, getAllUsers } = require('./database');
 const { searchAllSources, getDirectDownloadLink } = require('./searchEngine');
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
-const ADMIN_ID = process.env.ADMIN_CHAT_ID;
-const SECRET_TOKEN = process.env.TELEGRAM_SECRET_TOKEN;
+// 💡 تنظيف متغيرات البيئة من أي مسافات مخفية قد تسبب مشاكل
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN.trim());
+const ADMIN_ID = process.env.ADMIN_CHAT_ID ? process.env.ADMIN_CHAT_ID.trim() : "";
+const SECRET_TOKEN = process.env.TELEGRAM_SECRET_TOKEN ? process.env.TELEGRAM_SECRET_TOKEN.trim() : "";
 
-exports.handler = async (event) => {
+// 💡 إضافة parameter "context" المهم جداً في Netlify
+exports.handler = async (event, context) => {
+    // 💡 هذا السطر يمنع Netlify من إغلاق الدالة قبل إنهاء الاتصال بقاعدة البيانات
+    context.callbackWaitsForEmptyEventLoop = false;
+
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (event.headers['x-telegram-bot-api-secret-token'] !== SECRET_TOKEN) {
         return { statusCode: 403, body: 'Forbidden' };
@@ -21,6 +26,8 @@ exports.handler = async (event) => {
         }
         return { statusCode: 200, body: JSON.stringify({ status: 'ok' }) };
     } catch (e) {
+        // 💡 طباعة الخطأ الحقيقي في سجلات Netlify لكي نعرف المشكلة فوراً
+        console.error("🔴 CRITICAL ERROR:", e.message);
         return { statusCode: 200, body: 'Error handled' };
     }
 };
@@ -34,13 +41,13 @@ async function handleUpdate(update) {
         if (chatId === ADMIN_ID) {
             if (text === '/stats') {
                 const s = await getSystemStats();
-                return bot.sendMessage(chatId, `📊 Stats:\nUsers: ${s.totalUsers}\nVIPs: ${s.vipUsers}\nActive: ${s.activeThisMonth}`);
+                return await bot.sendMessage(chatId, `📊 Stats:\nUsers: ${s.totalUsers}\nVIPs: ${s.vipUsers}\nActive: ${s.activeThisMonth}`);
             }
             if (text.startsWith('/addvip')) {
                 const parts = text.split(' ');
                 if (parts.length === 3) {
                     const expiry = await upgradeUserToVip(parts[1], parseInt(parts[2]));
-                    return bot.sendMessage(chatId, expiry ? `✅ VIP Active until ${expiry.toISOString().split('T')[0]}` : `❌ User not found`);
+                    return await bot.sendMessage(chatId, expiry ? `✅ VIP Active until ${expiry.toISOString().split('T')[0]}` : `❌ User not found`);
                 }
             }
             if (text.startsWith('/broadcast ')) {
@@ -49,12 +56,12 @@ async function handleUpdate(update) {
                 for (const u of users) {
                     try { await bot.sendMessage(u.telegram_id, msg); } catch(e){}
                 }
-                return bot.sendMessage(chatId, `✅ Broadcast sent.`);
+                return await bot.sendMessage(chatId, `✅ Broadcast sent.`);
             }
         }
 
         if (text === '/start') {
-            return bot.sendMessage(chatId, "Welcome to Academic Library Bot! 📚\nSend any book title or author to search.");
+            return await bot.sendMessage(chatId, "Welcome to Academic Library Bot! 📚\nSend any book title or author to search.");
         }
         await processSearch(chatId, text);
     }
@@ -68,7 +75,7 @@ async function processSearch(chatId, query) {
         await bot.deleteMessage(chatId, loading.message_id);
         const vip = await isUserVip(chatId);
         let kb = vip ? [[{ text: "📩 Request Book", callback_data: `req_${query}` }]] : [];
-        return bot.sendMessage(chatId, `❌ No English results found.`, { reply_markup: { inline_keyboard: kb } });
+        return await bot.sendMessage(chatId, `❌ No English results found.`, { reply_markup: { inline_keyboard: kb } });
     }
 
     let text = `📚 *Results for:* ${query}\n\n`;
@@ -88,7 +95,7 @@ async function handleCallbackQuery(cq) {
     await bot.answerCallbackQuery(cq.id);
 
     if (data === 'show_pricing') {
-        return bot.sendMessage(chatId, "👑 *VIP Passes (Telegram Stars ⭐)*\n\nChoose a plan:", {
+        return await bot.sendMessage(chatId, "👑 *VIP Passes (Telegram Stars ⭐)*\n\nChoose a plan:", {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
@@ -102,7 +109,7 @@ async function handleCallbackQuery(cq) {
 
     if (data === 'buy_monthly' || data === 'buy_semester') {
         const isM = data === 'buy_monthly';
-        return bot.sendInvoice(
+        return await bot.sendInvoice(
             chatId,
             isM ? "Monthly VIP Pass" : "Semester VIP Pass",
             isM ? "30 days unlimited access" : "180 days unlimited access",
@@ -114,7 +121,7 @@ async function handleCallbackQuery(cq) {
     }
 
     if (data === 'back_to_start') {
-        return bot.sendMessage(chatId, "Send me a book title or author to search.");
+        return await bot.sendMessage(chatId, "Send me a book title or author to search.");
     }
 
     if (data.startsWith('dl_')) {
@@ -124,7 +131,7 @@ async function handleCallbackQuery(cq) {
 
         const status = await canUserDownload(chatId);
         if (!status.allowed) {
-            return bot.sendMessage(chatId, status.message, {
+            return await bot.sendMessage(chatId, status.message, {
                 reply_markup: { inline_keyboard: [[{ text: "👑 View VIP Pricing", callback_data: "show_pricing" }]] }
             });
         }
@@ -133,8 +140,8 @@ async function handleCallbackQuery(cq) {
         const link = await getDirectDownloadLink(source, downloadId);
         await bot.deleteMessage(chatId, waitMsg.message_id);
 
-        if (!link) return bot.sendMessage(chatId, "❌ Link not found.");
-        return bot.sendMessage(chatId, "📚 *Your download link:*", {
+        if (!link) return await bot.sendMessage(chatId, "❌ Link not found.");
+        return await bot.sendMessage(chatId, "📚 *Your download link:*", {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: [[{ text: "📥 Download File", url: link }]] }
         });
@@ -153,4 +160,3 @@ async function handleSuccessfulPayment(msg) {
         }
     }
 }
-
