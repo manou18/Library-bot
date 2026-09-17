@@ -45,18 +45,8 @@ async function searchBooksOnLibGen(searchQuery) {
 }
 
 async function getDirectDownloadLink(md5) {
-    try {
-        const response = await axios.get(`http://library.lol/main/${md5}`, {
-            timeout: 5000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-            }
-        });
-        const $ = cheerio.load(response.data);
-        return $('#download h2 a').attr('href') || null;
-    } catch (error) {
-        return null;
-    }
+    // إرجاع صفحة التحميل الرسمية مباشرة لتجنب حظر الاستضافة وسرعة الاستجابة
+    return `http://library.lol/main/${md5}`;
 }
 
 module.exports = { searchBooksOnLibGen, getDirectDownloadLink };
