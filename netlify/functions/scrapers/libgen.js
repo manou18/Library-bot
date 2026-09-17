@@ -2,9 +2,19 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 async function searchBooksOnLibGen(searchQuery) {
-    const baseUrl = 'https://libgen.is/search.php';
+    // استخدام النطاق البديل والأكثر استقراراً
+    const baseUrl = 'https://libgen.rs/search.php'; 
+    
     try {
-        const response = await axios.get(baseUrl, { params: { req: searchQuery, res: 25, column: 'def' } });
+        const response = await axios.get(baseUrl, { 
+            params: { req: searchQuery, res: 25, column: 'def' },
+            timeout: 5000, // إيقاف المحاولة إذا استغرقت أكثر من 5 ثوانٍ
+            headers: {
+                // التخفي كمتصفح حقيقي لتجاوز الحظر
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            }
+        });
+        
         const $ = cheerio.load(response.data);
         const booksList = [];
 
@@ -19,10 +29,14 @@ async function searchBooksOnLibGen(searchQuery) {
             const md5Link = $(tds[2]).find('a[href*="md5"]').attr('href');
             const md5 = md5Link ? md5Link.split('md5=')[1] : null;
 
-            if (title && md5 && language === 'english') {
-                booksList.push({ title, author, year, extension, download_id: md5, source: 'libgen', language });
+            // تحسين استخراج العنوان في حال كان الرابط مخفياً
+            const finalTitle = title || $(tds[2]).text().replace(/\[.*?\]/g, '').trim();
+
+            if (finalTitle && md5 && language === 'english') {
+                booksList.push({ title: finalTitle, author, year, extension, download_id: md5, source: 'libgen', language });
             }
         });
+        
         return booksList.slice(0, 5);
     } catch (error) {
         console.error("LibGen Error:", error.message);
@@ -32,7 +46,12 @@ async function searchBooksOnLibGen(searchQuery) {
 
 async function getDirectDownloadLink(md5) {
     try {
-        const response = await axios.get(`http://library.lol/main/${md5}`);
+        const response = await axios.get(`http://library.lol/main/${md5}`, {
+            timeout: 5000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            }
+        });
         const $ = cheerio.load(response.data);
         return $('#download h2 a').attr('href') || null;
     } catch (error) {
@@ -41,4 +60,3 @@ async function getDirectDownloadLink(md5) {
 }
 
 module.exports = { searchBooksOnLibGen, getDirectDownloadLink };
-
